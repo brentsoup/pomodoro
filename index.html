@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pomodoro</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍅</text></svg>">
+    <link rel="preload" href="inactive.png?v=2" as="image">
+    <link rel="preload" href="click.png?v=2" as="image">
+    <style>
+        @font-face {
+            font-family: 'DSEG7';
+            src: url('https://cdn.jsdelivr.net/npm/dseg@0.46.0/fonts/DSEG7-Classic/DSEG7Classic-Bold.woff2') format('woff2'),
+                 url('https://cdn.jsdelivr.net/npm/dseg@0.46.0/fonts/DSEG7-Classic/DSEG7Classic-Bold.woff') format('woff');
+            font-weight: bold;
+            font-display: swap;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            height: 100%;
+            background: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .tomato {
+            position: relative;
+            width: min(650px, 85vw);
+            cursor: pointer;
+            -webkit-user-drag: none;
+        }
+
+        .tomato img {
+            width: 100%;
+            height: auto;
+            display: block;
+            -webkit-user-drag: none;
+            pointer-events: none;
+        }
+
+        .tomato-click {
+            position: absolute;
+            top: 0;
+            left: 0;
+            opacity: 0;
+        }
+
+        .tomato:active .tomato-default { opacity: 0 !important; }
+        .tomato:active .tomato-click { opacity: 1 !important; }
+
+        .screen {
+            position: absolute;
+            top: 55.5%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-family: 'DSEG7', 'Courier New', monospace;
+            font-weight: bold;
+            font-size: clamp(2rem, 6vw, 3.8rem);
+            color: rgba(255, 255, 255, 0.82);
+            letter-spacing: 0.08em;
+            text-align: center;
+            pointer-events: none;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.15);
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: rotate(0deg); }
+            10% { transform: rotate(-3.5deg) translateX(-2px); }
+            20% { transform: rotate(3.5deg) translateX(2px); }
+            30% { transform: rotate(-3.5deg) translateX(-2px); }
+            40% { transform: rotate(3.5deg) translateX(2px); }
+            50% { transform: rotate(-2.5deg) translateX(-1px); }
+            60% { transform: rotate(2.5deg) translateX(1px); }
+            70% { transform: rotate(-2deg); }
+            80% { transform: rotate(2deg); }
+            90% { transform: rotate(-1deg); }
+        }
+
+        .ringing {
+            animation: shake 0.35s ease-in-out infinite;
+            transform-origin: center 85%;
+        }
+    </style>
+</head>
+<body>
+    <div class="tomato" id="tomato">
+        <img class="tomato-default" src="inactive.png?v=2" alt="" draggable="false">
+        <img class="tomato-click" src="click.png?v=2" alt="" draggable="false">
+        <div class="screen" id="screen">25:00</div>
+    </div>
+
+    <script>
+        const tomato = document.getElementById('tomato');
+        const display = document.getElementById('screen');
+
+        let state = 'idle';
+        let mode = 25;
+        let timeLeft = 25 * 60;
+        let ticker = null;
+        let tapCount = 0;
+        let tapTimer = null;
+        let audioCtx = null;
+        let alarmTimer = null;
+
+        function ensureAudio() {
+            if (!audioCtx || audioCtx.state === 'closed') {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function formatTime(seconds) {
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+        }
+
+        function updateDisplay() {
+            const t = formatTime(timeLeft);
+            display.textContent = t;
+            document.title = t;
+        }
+
+        function startTicker() {
+            clearInterval(ticker);
+            ticker = setInterval(() => {
+                timeLeft--;
+                if (timeLeft <= 0) {
+                    timeLeft = 0;
+                    clearInterval(ticker);
+                    ticker = null;
+                    state = 'ringing';
+                    tomato.classList.add('ringing');
+                    startAlarm();
+                }
+                updateDisplay();
+            }, 1000);
+        }
+
+        function startAlarm() {
+            function beep() {
+                if (!audioCtx || audioCtx.state === 'closed') return;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.type = 'square';
+                gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+                osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+                osc.frequency.setValueAtTime(660, audioCtx.currentTime + 0.1);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+                osc.start(audioCtx.currentTime);
+                osc.stop(audioCtx.currentTime + 0.25);
+            }
+
+            beep();
+            alarmTimer = setInterval(beep, 600);
+        }
+
+        function stopAlarm() {
+            tomato.classList.remove('ringing');
+            if (alarmTimer) {
+                clearInterval(alarmTimer);
+                alarmTimer = null;
+            }
+        }
+
+        function handleTaps(count) {
+            if (count === 1) {
+                if (state === 'ringing') {
+                    stopAlarm();
+                    state = 'idle';
+                    timeLeft = mode * 60;
+                    updateDisplay();
+                } else if (state === 'idle' || state === 'paused') {
+                    state = 'running';
+                    startTicker();
+                } else if (state === 'running') {
+                    state = 'paused';
+                    clearInterval(ticker);
+                    ticker = null;
+                }
+            } else if (count === 2) {
+                stopAlarm();
+                clearInterval(ticker);
+                ticker = null;
+                mode = mode === 25 ? 5 : 25;
+                timeLeft = mode * 60;
+                state = 'idle';
+                updateDisplay();
+            } else if (count >= 3) {
+                stopAlarm();
+                clearInterval(ticker);
+                ticker = null;
+                timeLeft = mode * 60;
+                state = 'idle';
+                updateDisplay();
+            }
+        }
+
+        tomato.addEventListener('click', (e) => {
+            e.preventDefault();
+            ensureAudio();
+            tapCount++;
+            clearTimeout(tapTimer);
+            tapTimer = setTimeout(() => {
+                handleTaps(tapCount);
+                tapCount = 0;
+            }, 350);
+        });
+
+        tomato.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        updateDisplay();
+    </script>
+</body>
+</html>
